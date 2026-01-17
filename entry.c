@@ -109,6 +109,7 @@ BOOL steal_token(DWORD pid, PHANDLE hTarget) {
                                             NULL,
                                             SecurityImpersonation, TokenPrimary, hTarget);
     // clang-format on
+    KERNEL32$CloseHandle(hToken);
     KERNEL32$CloseHandle(hProcess);
     return result;
 }
@@ -262,6 +263,7 @@ void go(char *args, int len) {
             if (status) {       
                 BeaconPrintf(CALLBACK_OUTPUT, "Successfully started process with cmd: %s\n", cmdstr);
             } else {
+                BeaconPrintf(CALLBACK_ERROR, "CreateProcessWithTokenW Error: %i\n", KERNEL32$GetLastError());
                 BeaconPrintf(CALLBACK_ERROR, "Unable to start process with cmd: %s\n", cmdstr);
             }
 
