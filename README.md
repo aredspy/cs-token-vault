@@ -1,3 +1,10 @@
+Fork of [Henkru/cs-token-vault](https://github.com/Henkru/cs-token-vault) with added execution functionality via CreateProcessWithTokenW.
+
+Caveats: 
+- Execution does not work on native EXEs that require certain environment conditions or token privliges to function such as powershell and cmd
+- CreateProcessWithTokenW uses the secondary logon service to work, so assume it will generate resultant events which could be scrutinized by some EDRs.
+- Did not update the CS aggressor script because I'm too broke for CS (will add sliver extension and helper script soon)
+
 # Token Vault BOF for Cobalt Strike
 
 This Beacon Object File (BOF) creates in-memory storage for stolen/duplicated
@@ -110,6 +117,11 @@ beacon> token-vault remove 6600
 [+] host called home, sent: 3001 bytes
 [+] received output:
 removed: 6600
+```
+
+### Run EXE
+```text
+
 ```
 
 Additionally, the `token-vault remove-all` command removes all tokens at once.
